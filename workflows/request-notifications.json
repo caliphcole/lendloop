@@ -1,0 +1,121 @@
+{
+  "name": "LendLoop request notifications",
+  "nodes": [
+    {
+      "id": "eb01371d-5580-57b8-8b8f-b27bb3403dda",
+      "name": "Request webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-request",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "webhookId": "548f068a-de49-5b2b-8fbe-c631b37cddc7"
+    },
+    {
+      "id": "48901bfa-9e6f-5461-83ee-3856c3430203",
+      "name": "Verify request and sign receipt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const { createHmac } = require('crypto');\nconst secret = $env.LENDLOOP_WEBHOOK_SECRET;\nif (!secret) throw new Error('LENDLOOP_WEBHOOK_SECRET is missing');\nfunction signed(data) {\n  const payload = JSON.stringify({ ...data, timestamp: Date.now() });\n  return { payload, signature: createHmac('sha256', secret).update(payload).digest('hex') };\n}\n\nconst { timingSafeEqual } = require('crypto');\nconst { payload, signature } = $input.first().json.body ?? {};\nif (typeof payload !== 'string' || payload.length > 8192 || !/^[a-f0-9]{64}$/.test(signature ?? ''))\n  throw new Error('Invalid notification envelope');\nconst expected = createHmac('sha256', secret).update(payload).digest();\nif (!timingSafeEqual(expected, Buffer.from(signature, 'hex'))) throw new Error('Invalid notification signature');\nconst event = JSON.parse(payload);\nif (typeof event.eventId !== 'string') throw new Error('Invalid event ID');\nreturn [{ json: signed({ operation: 'record-notification', id: event.eventId }) }];\n"
+      }
+    },
+    {
+      "id": "dd59dcbf-22d3-5bc9-8003-2b49eef5c2f1",
+      "name": "Record mock notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL + '/automation/notified' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.payload }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "f6c1e8a9-61b6-54d1-9923-1938f49fe1df",
+      "name": "Show notification status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({ json: { status: item.json.updated ? 'notification recorded' : 'already recorded' } }));"
+      }
+    }
+  ],
+  "connections": {
+    "Request webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify request and sign receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify request and sign receipt": {
+      "main": [
+        [
+          {
+            "node": "Record mock notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record mock notification": {
+      "main": [
+        [
+          {
+            "node": "Show notification status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  }
+}

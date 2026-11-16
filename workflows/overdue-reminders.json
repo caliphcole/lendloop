@@ -1,0 +1,194 @@
+{
+  "name": "LendLoop overdue reminders",
+  "nodes": [
+    {
+      "id": "229e9f2f-3ac2-531f-a225-f1afe1347dcd",
+      "name": "Daily UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bc275dde-c892-54ca-9112-f2ac3a66aa7f",
+      "name": "Sign overdue request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const { createHmac } = require('crypto');\nconst secret = $env.LENDLOOP_WEBHOOK_SECRET;\nif (!secret) throw new Error('LENDLOOP_WEBHOOK_SECRET is missing');\nfunction signed(data) {\n  const payload = JSON.stringify({ ...data, timestamp: Date.now() });\n  return { payload, signature: createHmac('sha256', secret).update(payload).digest('hex') };\n}\nreturn [{ json: signed({ operation: 'list-overdue' }) }];"
+      }
+    },
+    {
+      "id": "18843838-406f-5909-a059-82a23da6e273",
+      "name": "Fetch overdue loans",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL + '/automation/overdue' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.payload }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "aa4d169b-0a1b-515b-a0f5-8ca9086951b6",
+      "name": "Sign reminder receipts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const { createHmac } = require('crypto');\nconst secret = $env.LENDLOOP_WEBHOOK_SECRET;\nif (!secret) throw new Error('LENDLOOP_WEBHOOK_SECRET is missing');\nfunction signed(data) {\n  const payload = JSON.stringify({ ...data, timestamp: Date.now() });\n  return { payload, signature: createHmac('sha256', secret).update(payload).digest('hex') };\n}\n\nconst loans = $input.all().flatMap(item => Array.isArray(item.json) ? item.json : [item.json]);\nreturn loans.filter(loan => typeof loan.id === 'string')\n  .map(loan => ({ json: signed({ operation: 'mark-reminded', id: loan.id }) }));\n"
+      }
+    },
+    {
+      "id": "5c01c8da-f727-5b97-ab05-13106b66fcd5",
+      "name": "Record mock reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1000,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL + '/automation/reminded' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.payload }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "9a1fc519-4fa2-50f4-bdfe-8f58af6d0b04",
+      "name": "Show reminder status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({ json: { status: item.json.updated ? 'reminder recorded' : 'already handled' } }));"
+      }
+    }
+  ],
+  "connections": {
+    "Daily UTC": {
+      "main": [
+        [
+          {
+            "node": "Sign overdue request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign overdue request": {
+      "main": [
+        [
+          {
+            "node": "Fetch overdue loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch overdue loans": {
+      "main": [
+        [
+          {
+            "node": "Sign reminder receipts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign reminder receipts": {
+      "main": [
+        [
+          {
+            "node": "Record mock reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record mock reminder": {
+      "main": [
+        [
+          {
+            "node": "Show reminder status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC"
+  }
+}

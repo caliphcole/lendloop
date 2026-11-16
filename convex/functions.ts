@@ -1,0 +1,10 @@
+import { internalActionGeneric, internalMutationGeneric, internalQueryGeneric, mutationGeneric, queryGeneric } from "convex/server";
+import type { ActionBuilder, DataModelFromSchemaDefinition, GenericQueryCtx, MutationBuilder, QueryBuilder } from "convex/server";
+import type schema from "./schema";
+type Model = DataModelFromSchemaDefinition<typeof schema>;
+export type ReadContext = GenericQueryCtx<Model>;
+export const query: QueryBuilder<Model,"public"> = queryGeneric;
+export const mutation: MutationBuilder<Model,"public"> = mutationGeneric;
+export const internalQuery: QueryBuilder<Model,"internal"> = internalQueryGeneric;
+export const internalMutation: MutationBuilder<Model,"internal"> = internalMutationGeneric;
+export const internalAction: ActionBuilder<Model,"internal"> = internalActionGeneric;
